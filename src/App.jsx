@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import TodoList from './TodoList.jsx';
 import TodoForm from './TodoForm.jsx'
 import './App.css'
@@ -11,14 +11,19 @@ import './App.css'
 
 function App() {
 
+  // const [todoList, setTodoList] = useState(todos);
   const [todoList, setTodoList] = useState(todos);
 
+  useEffect(() => {
+    document.title = `You have ${todoList.length} todos`;
+  }, [todoList]);
+
   return(
-    <div>
+    <>
       <h1>Todo List</h1>
       <TodoForm />
       <TodoList todoList={todoList} />
-    </div>
+    </>
   )
 }
 
