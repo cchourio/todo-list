@@ -1,11 +1,36 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import TodoList from './TodoList/TodoList.jsx';
 import TodoForm from './TodoForm.jsx';
+import SortBy from '../../shared/SortBy.jsx';
+import FilterInput from '../../shared/FilterInput.jsx';
+import useDebounce from '../../utils/useDebounce.js';
 
 function TodosPage({ token }) {
   const [todoList, setTodoList] = useState([]);
   const [error, setError] = useState('');
   const [isTodoListLoading, setIsTodoListLoading] = useState(false);
+  
+  // Sort state
+  const [sortBy, setSortBy] = useState('createdAt');
+  const [sortDirection, setSortDirection] = useState('desc');
+  
+  // Filter state
+  const [filterTerm, setFilterTerm] = useState('');
+  const debouncedFilterTerm = useDebounce(filterTerm, 300);
+  const [filterError, setFilterError] = useState('');
+  
+  // Cache invalidation
+  const [dataVersion, setDataVersion] = useState(0);
+
+  // Cache invalidation function
+  const invalidateCache = useCallback(() => {
+    setDataVersion(prev => prev + 1);
+  }, []);
+
+  // Filter change handler
+  const handleFilterChange = (newTerm) => {
+    setFilterTerm(newTerm);
+  };
 
   // Cargar tareas desde la API
   useEffect(() => {
@@ -15,7 +40,17 @@ function TodosPage({ token }) {
       setIsTodoListLoading(true);
       
       try {
-        const params = new URLSearchParams({ limit: 100 });
+        const paramsObject = {
+          sortBy,
+          sortDirection,
+          limit: 100
+        };
+        
+        if (debouncedFilterTerm) {
+          paramsObject.find = debouncedFilterTerm;
+        }
+        
+        const params = new URLSearchParams(paramsObject);
         const response = await fetch(`/api/tasks?${params}`, {
           headers: {
             'X-CSRF-TOKEN': token,
@@ -31,17 +66,22 @@ function TodosPage({ token }) {
         }
 
         const data = await response.json();
-        setTodoList(data.tasks); // ← La API devuelve { tasks: [...], pagination: {...} }
+        setTodoList(data.tasks);
         setError('');
+        setFilterError('');
       } catch (err) {
-        setError(err.message);
+        if (debouncedFilterTerm || sortBy !== 'createdAt' || sortDirection !== 'desc') {
+          setFilterError(`Error filtering/sorting todos: ${err.message}`);
+        } else {
+          setError(`Error fetching todos: ${err.message}`);
+        }
       } finally {
         setIsTodoListLoading(false);
       }
     }
 
     fetchTodos();
-  }, [token]);
+  }, [token, sortBy, sortDirection, debouncedFilterTerm]);
 
   async function addTodo(todoTitle) {
     // 1. Crear tarea temporal con ID único
@@ -82,6 +122,7 @@ function TodosPage({ token }) {
       setTodoList((prev) => 
         prev.map(todo => todo.id === tempTodo.id ? serverTodo : todo)
       );
+      invalidateCache();
       setError('');
     } catch (err) {
       // 6. Si falla: Eliminar tarea temporal
@@ -122,6 +163,7 @@ function TodosPage({ token }) {
         throw new Error('Failed to complete todo');
       }
       
+      invalidateCache();
       setError('');
     } catch (err) {
       // 5. ROLLBACK: Revertir al estado original
@@ -167,6 +209,7 @@ function TodosPage({ token }) {
         throw new Error('Failed to update todo');
       }
 
+      invalidateCache();
       setError('');
     } catch (err) {
       // 5. ROLLBACK
@@ -178,12 +221,73 @@ function TodosPage({ token }) {
   }
 
   return (
-    <>
+    <div style={{ maxWidth: '800px', margin: '0 auto', padding: '20px' }}>
       {error && (
-        <div style={{ color: 'red', padding: '10px', marginBottom: '10px' }}>
+        <div style={{ 
+          color: 'white', 
+          backgroundColor: '#dc3545',
+          padding: '10px', 
+          marginBottom: '10px',
+          borderRadius: '4px'
+        }}>
           {error}
-          <button onClick={() => setError('')} style={{ marginLeft: '10px' }}>
+          <button 
+            onClick={() => setError('')} 
+            style={{ 
+              marginLeft: '10px',
+              padding: '4px 8px',
+              backgroundColor: 'white',
+              color: '#dc3545',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer'
+            }}
+          >
             Clear Error
+          </button>
+        </div>
+      )}
+
+      {filterError && (
+        <div style={{ 
+          color: 'white', 
+          backgroundColor: '#ffc107',
+          padding: '10px', 
+          marginBottom: '10px',
+          borderRadius: '4px'
+        }}>
+          <p style={{ margin: '0 0 10px 0' }}>{filterError}</p>
+          <button 
+            onClick={() => setFilterError('')}
+            style={{ 
+              marginRight: '10px',
+              padding: '6px 12px',
+              backgroundColor: 'white',
+              color: '#856404',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer'
+            }}
+          >
+            Clear Filter Error
+          </button>
+          <button 
+            onClick={() => {
+              setFilterTerm('');
+              setSortBy('createdAt');
+              setSortDirection('desc');
+              setFilterError('');
+            }}
+            style={{ 
+              padding: '6px 12px',
+              backgroundColor: 'white',
+              color: '#856404',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer'
+            }}
+          >
+            Reset Filters
           </button>
         </div>
       )}
@@ -192,13 +296,27 @@ function TodosPage({ token }) {
         <p style={{ textAlign: 'center', padding: '20px' }}>Loading todos...</p>
       )}
       
+      <SortBy 
+        sortBy={sortBy}
+        sortDirection={sortDirection}
+        onSortByChange={setSortBy}
+        onSortDirectionChange={setSortDirection}
+      />
+
+      <FilterInput 
+        filterTerm={filterTerm}
+        onFilterChange={handleFilterChange}
+      />
+      
       <TodoForm onAddTodo={addTodo} />
+      
       <TodoList 
         todoList={todoList} 
         onCompleteTodo={completeTodo}
         onUpdateTodo={updateTodo}
+        dataVersion={dataVersion}
       />
-    </>
+    </div>
   );
 }
 
